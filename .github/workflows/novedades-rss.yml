@@ -1,0 +1,41 @@
+name: Bot de novedades (RSS)
+
+on:
+  # Permite lanzarlo a mano desde la pestaña Actions
+  workflow_dispatch:
+  # Para que se ejecute solo de lunes a viernes a las 7:00 (UTC), quita el # de las dos líneas siguientes:
+  # schedule:
+  #   - cron: "0 7 * * 1-5"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  proponer-novedades:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Leer las fuentes RSS y actualizar novedades.md
+        run: python3 scripts/novedades_rss.py
+
+      - name: Abrir un Pull Request con los cambios
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet; then
+            echo "No hay novedades nuevas: no se abre ningún Pull Request."
+            exit 0
+          fi
+          FECHA=$(date -u +%Y-%m-%d)
+          RAMA="bot/novedades-$FECHA-${{ github.run_number }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$RAMA"
+          git commit -am "Novedades automáticas del $FECHA"
+          git push origin "$RAMA"
+          gh pr create --base main --head "$RAMA" \
+            --title "Novedades automáticas del $FECHA" \
+            --body "Titulares recogidos automáticamente de fuentes RSS. Revisa que sean relevantes antes de fusionar; puedes editar o borrar líneas en este mismo Pull Request."
