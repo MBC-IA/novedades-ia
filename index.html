@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tablón de novedades de IA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@500&display=swap">
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <header class="cabecera">
+    <div class="cabecera__texto">
+      <p class="etiqueta">Tablón diario</p>
+      <h1 id="titulo">Novedades de IA</h1>
+      <div id="intro" class="intro"></div>
+    </div>
+    <div class="cabecera__meta">
+      <p id="resumen" class="resumen"></p>
+      <p id="ultimo-cambio" class="ultimo-cambio" hidden></p>
+      <p class="acciones">
+        <a id="enlace-editar" class="boton" href="#" hidden>Editar novedades.md</a>
+        <a id="enlace-repo" class="boton boton--sec" href="#" hidden>Ver el repositorio</a>
+      </p>
+    </div>
+  </header>
+
+  <main id="tablon" class="tablon">
+    <p class="cargando">Cargando novedades…</p>
+  </main>
+
+  <footer class="pie">
+    Esta página se genera a partir del archivo <code>novedades.md</code>.
+    Cualquier cambio en ese archivo, una vez fusionado en la rama <code>main</code>, aparece aquí en uno o dos minutos.
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script>
+    // Deduce usuario y repositorio a partir de la URL de GitHub Pages (usuario.github.io/repositorio)
+    const repo = (() => {
+      const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+      const nombre = location.pathname.split('/').filter(Boolean)[0];
+      return m && nombre ? { owner: m[1], nombre } : null;
+    })();
+
+    const fechaLarga = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+    function formatearDia(texto) {
+      const m = texto.match(/^(\d{4})-(\d{2})-(\d{2})(.*)$/);
+      if (!m) return { iso: '', largo: texto };
+      const fecha = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return { iso: `${m[1]}-${m[2]}-${m[3]}`, largo: fechaLarga.format(fecha) + m[4] };
+    }
+
+    function pintar(md) {
+      const dias = [];
+      const intro = [];
+      let actual = null;
+
+      for (const t of marked.lexer(md)) {
+        if (t.type === 'heading' && t.depth === 1) {
+          document.getElementById('titulo').textContent = t.text;
+        } else if (t.type === 'heading' && t.depth === 2) {
+          actual = { titulo: t.text, noticias: [], notas: [] };
+          dias.push(actual);
+        } else if (t.type === 'space') {
+          continue;
+        } else if (!actual) {
+          intro.push(t.raw);
+        } else if (t.type === 'list') {
+          actual.noticias.push(...t.items);
+        } else {
+          actual.notas.push(t.raw);
+        }
+      }
+
+      document.getElementById('intro').innerHTML = marked.parse(intro.join('\n'));
+
+      const total = dias.reduce((n, d) => n + d.noticias.length, 0);
+      document.getElementById('resumen').textContent =
+        `${total} ${total === 1 ? 'noticia' : 'noticias'} en ${dias.length} ${dias.length === 1 ? 'día' : 'días'}`;
+
+      const tablon = document.getElementById('tablon');
+      tablon.innerHTML = '';
+      for (const dia of dias) {
+        const { iso, largo } = formatearDia(dia.titulo);
+        const seccion = document.createElement('section');
+        seccion.className = 'dia';
+        seccion.innerHTML = `
+          <div class="dia__fecha">
+            <span class="dia__iso">${iso}</span>
+            <h2>${largo}</h2>
+            <span class="dia__cuenta">${dia.noticias.length} ${dia.noticias.length === 1 ? 'noticia' : 'noticias'}</span>
+          </div>
+          <div class="dia__notas">${marked.parse(dia.notas.join('\n'))}</div>
+          <ul class="dia__noticias">
+            ${dia.noticias.map(n => `<li class="nota">${marked.parseInline(n.text)}</li>`).join('')}
+          </ul>`;
+        tablon.appendChild(seccion);
+      }
+    }
+
+    async function ultimoCambio() {
+      if (!repo) return;
+      const base = `https://github.com/${repo.owner}/${repo.nombre}`;
+      const editar = document.getElementById('enlace-editar');
+      const verRepo = document.getElementById('enlace-repo');
+      editar.href = `${base}/edit/main/novedades.md`;
+      verRepo.href = base;
+      editar.hidden = verRepo.hidden = false;
+
+      try {
+        const r = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.nombre}/commits?path=novedades.md&per_page=1`);
+        const [commit] = await r.json();
+        if (!commit) return;
+        const quien = commit.author?.login || commit.commit.author.name;
+        const cuando = new Date(commit.commit.author.date).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' });
+        const p = document.getElementById('ultimo-cambio');
+        const escapar = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        p.innerHTML = `Último cambio: <a href="${commit.html_url}">${escapar(commit.commit.message.split('\n')[0])}</a> · <strong>${escapar(quien)}</strong> · ${cuando}`;
+        p.hidden = false;
+      } catch { /* sin conexión con la API de GitHub: no se muestra */ }
+    }
+
+    fetch('novedades.md', { cache: 'no-store' })
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
+      .then(pintar)
+      .catch(() => {
+        document.getElementById('tablon').innerHTML =
+          '<p class="cargando">No se ha podido leer <code>novedades.md</code>. Si abres la página en local, usa un servidor (por ejemplo <code>python -m http.server</code>).</p>';
+      });
+    ultimoCambio();
+  </script>
+</body>
+</html>
